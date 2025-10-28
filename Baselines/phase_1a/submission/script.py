@@ -18,6 +18,11 @@ def run_inference(TEST_IMAGE_PATH, svm_model, k, SUBMISSION_CSV_SAVE_PATH):
         path_to_image = os.path.join(TEST_IMAGE_PATH, test_image)
         
         image = cv2.imread(path_to_image)
+
+        # IMAGE PREPROCESSING
+        #TODO
+        #__________
+
         image_features = extract_features_from_image(image)
         
         image_feature_list.append(image_features)
