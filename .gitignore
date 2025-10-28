@@ -1,4 +1,12 @@
 venv
-Baselines
 Data
 How_To_Videos
+
+# Ignore any directory named `images` anywhere in the repo
+**/images/
+**/images/**
+
+*.jpg
+*.png
+
+model
