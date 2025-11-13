@@ -142,7 +142,6 @@ def train_and_save_model(base_path, images_folder, gt_csv, save_dir, n_component
 
 if __name__ == "__main__":
     
-    # CONFIGURATION - Adjust these paths to your setup
     BASE_PATH = "C:/Users/anna2/ISM/ANNA/phase1a2"
     IMAGES_FOLDER = "C:/Users/anna2/ISM/Images"
     GT_CSV = "C:/Users/anna2/ISM/Baselines/phase_1a/gt_for_classification_multiclass_from_filenames_0_index.csv"
@@ -150,7 +149,7 @@ if __name__ == "__main__":
     SAVE_DIR = "C:/Users/anna2/ISM/ANNA/phase1a2/submission"
     
     # Number of PCA components
-    N_COMPONENTS = 200
+    N_COMPONENTS = 200 #can be adjusted 
     
     # Train and save
     train_and_save_model(BASE_PATH, IMAGES_FOLDER, GT_CSV, SAVE_DIR, N_COMPONENTS)

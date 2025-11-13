@@ -1,6 +1,5 @@
 """
 Utility functions for surgical instrument classification
-FIXED VERSION - Bug fixes for HuggingFace submission
 """
 
 import cv2
@@ -17,42 +16,49 @@ def preprocess_image(image):
     """
     Apply CLAHE preprocessing for better contrast
     MUST be defined BEFORE extract_features_from_image
+    (Contrast Limited Adaptive Historam Equalization)
     """
-    # Convert to LAB color space
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    # Convert to LAB color space (basically separating lightness, L, from color info)
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB) 
+    l, a, b = cv2.split(lab) #this enhances constrast between colors
     
     # Apply CLAHE to L channel
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)) #split into a 8x8 grid and performs the contrast enhancement to the smaller regions instead of full image
     l = clahe.apply(l)
     
     # Merge and convert back
-    enhanced = cv2.merge([l, a, b])
-    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+    enhanced = cv2.merge([l, a, b]) #merge the contrast channel with the other two (A,B)
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR) #go back to BGR so it can be used later on
     
     return enhanced
 
 
+#this is the same as baseline code, well working so let's keep it 
+#it basically computes normalized color histograms for the classic three channels
 def rgb_histogram(image, bins=256):
     """Extract RGB histogram features"""
     hist_features = []
-    for i in range(3):  # RGB Channels
+    for i in range(3):  # RGB Channels 
         hist, _ = np.histogram(image[:, :, i], bins=bins, range=(0, 256), density=True)
         hist_features.append(hist)
     return np.concatenate(hist_features)
 
 
 def hu_moments(image):
-    """Extract Hu moment features"""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Fixed: BGR not RGB
-    moments = cv2.moments(gray)
+    """Extract Hu moment features, takes BGR format in input
+    basically provides shape description that are consistent 
+    wrt to position, size and rotation"""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) #turn to greyscale (works in 1 channel)
+    moments = cv2.moments(gray) 
     hu_moments = cv2.HuMoments(moments).flatten()
-    return hu_moments
+    return hu_moments 
 
 
 def glcm_features(image, distances=[1], angles=[0], levels=256, symmetric=True, normed=True):
-    """Extract GLCM texture features"""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Already correct
+    """Extract GLCM texture features, 
+    captures texture info considering spatial
+    relationship between pixel intensities. works well with RGB and hu"""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) 
     glcm = graycomatrix(gray, distances=distances, angles=angles, levels=levels, 
                        symmetric=symmetric, normed=normed)
     contrast = graycoprops(glcm, 'contrast').flatten()
@@ -65,12 +71,13 @@ def glcm_features(image, distances=[1], angles=[0], levels=256, symmetric=True, 
 
 
 def local_binary_pattern_features(image, P=8, R=1):
-    """Extract Local Binary Pattern features"""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Already correct
+    """Extract Local Binary Pattern features, useful for light changes
+    combined with rgb, hu and glcm"""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  
     lbp = local_binary_pattern(gray, P, R, method='uniform')
     (hist, _) = np.histogram(lbp.ravel(), bins=np.arange(0, P + 3), 
                             range=(0, P + 2), density=True)
-    return hist
+    return hist #feature vector representing the texture of the image
 
 
 def hog_features(image, orientations=12, pixels_per_cell=(8, 8), cells_per_block=(2, 2)):
@@ -78,7 +85,7 @@ def hog_features(image, orientations=12, pixels_per_cell=(8, 8), cells_per_block
     Extract HOG (Histogram of Oriented Gradients) features
     Great for capturing shape and edge information in surgical instruments
     """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Fixed: BGR not RGB
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  
     
     # Resize to standard size for consistency
     gray_resized = cv2.resize(gray, (256, 256))
@@ -92,10 +99,12 @@ def hog_features(image, orientations=12, pixels_per_cell=(8, 8), cells_per_block
         feature_vector=True
     )
     
-    return hog_features_vector
+    return hog_features_vector #Returns a vector capturing local edge 
+    #directions and shape information, useful for detecting instruments, 
+    #objects, or structural patterns.
 
 
-def luv_histogram(image, bins=32):
+def luv_histogram(image, bins=32): #instead of bgr it uses lightness and chromatic components
     """
     Extract histogram in LUV color space
     LUV is perceptually uniform and better for underwater/surgical imaging
@@ -111,10 +120,10 @@ def luv_histogram(image, bins=32):
 def gabor_features(image, frequencies=[0.1, 0.2, 0.3], 
                    orientations=[0, 45, 90, 135]):
     """
-    Extract Gabor filter features
-    MUST be defined BEFORE extract_features_from_image
+    Extract Gabor filter features (gabor kernels)
+    texture orientation that deals well with different scales and diff orientation
     """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Fixed: BGR not RGB
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # uses intensity and not color
     features = []
     
     for freq in frequencies:
@@ -149,12 +158,12 @@ def extract_features_from_image(image):
     glcm_features_vector = glcm_features(image)
     lbp_features = local_binary_pattern_features(image)
     
-    # Enhanced features
+    # Enhanced features that add discriminative power for complex images 
     hog_feat = hog_features(image)
     luv_hist = luv_histogram(image)
     gabor_feat = gabor_features(image)
     
-    # Concatenate all features
+    # Concatenate all features (produces a single vector)
     image_features = np.concatenate([
         hist_features,
         hu_features,
@@ -165,7 +174,7 @@ def extract_features_from_image(image):
         gabor_feat
     ])
     
-    return image_features
+    return image_features # comprehensive numerical representation of the imag
 
 
 def fit_pca_transformer(data, num_components):
@@ -225,6 +234,7 @@ def apply_pca_transform(data, pca_params):
     data_standardized = (data - pca_params['mean']) / pca_params['std']
     
     # Apply PCA transformation
+    # Projects new data onto the same principal components computed from training data
     data_reduced = pca_params['pca_model'].transform(data_standardized)
     
     return data_reduced

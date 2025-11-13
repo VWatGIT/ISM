@@ -1,6 +1,6 @@
 """
-Inference script for Hugging Face competition submission
-Fixed version combining baseline structure with enhanced features
+Inference script
+Version combining baseline structure with enhanced features
 """
 
 import os
