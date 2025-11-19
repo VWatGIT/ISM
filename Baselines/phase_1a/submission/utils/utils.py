@@ -280,7 +280,7 @@ if __name__ == "__main__":
     image = cv2.imread(TEST_IMAGE_PATH)
     
 
-    filtered_image = filter_background(image)
+    filtered_image = _filter_background(image)
 
     cv2.imshow("filtered", filtered_image)
     cv2.waitKey(0)
