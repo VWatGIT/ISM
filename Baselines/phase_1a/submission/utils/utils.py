@@ -97,15 +97,42 @@ def wavelet_features(image):
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     features = []
 
-    coeffs2 = pywt.dwt2(image, 'bior1.3')
+    coeffs2 = pywt.dwt2(image, 'haar') # alternative use: 'db4'
     LL, (LH, HL, HH) = coeffs2    
     
     features.extend(LL.flatten())
-    features.extend(LH.flatten())
-    features.extend(HL.flatten())
-    features.extend(HH.flatten())
+    #features.extend(LH.flatten())
+    #features.extend(HL.flatten())
+    #features.extend(HH.flatten())
     
     return np.array(features)
+
+
+def _filter_background(image):
+
+    # convert to hsv color space
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    # define range for surgical instrument colors
+    lower_bound = np.array([0, 0, 0])
+    upper_bound = np.array([360, 70, 100])
+
+    # create mask
+    mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    # apply mask
+    filtered_image = cv2.bitwise_and(image, image, mask=mask)
+    return filtered_image
+
+
+def filtered_hsv_histogram(image):
+    """Extract HSV histogram features"""
+    filtered_image = _filter_background(image)
+    hsv = cv2.cvtColor(filtered_image, cv2.COLOR_BGR2HSV)
+    hist_features = []
+    for i in range(3):  # HSV Channels
+        hist, _ = np.histogram(hsv[:, :, i], bins=256, range=(0, 256), density=True)
+        hist_features.append(hist)
+    return np.concatenate(hist_features)
+
 
 def extract_features_from_image(image):
     """
@@ -128,7 +155,8 @@ def extract_features_from_image(image):
     # Enhanced features
     hog_feat = hog_features(image)
     luv_hist = luv_histogram(image)
-    wlt_feat = wavelet_features(image)
+    hsv_hist = filtered_hsv_histogram(image)
+    #wlt_feat = wavelet_features(image)
     
     # Concatenate all features
     image_features = np.concatenate([
@@ -138,73 +166,58 @@ def extract_features_from_image(image):
         lbp_features,
         hog_feat,
         luv_hist,
-        wlt_feat
+        hsv_hist,
+        #wlt_feat
     ])
     
     return image_features
 
 
-def fit_pca_transformer(data, num_components):
+def perform_pca(data, num_components):
     """
-    Fit a PCA transformer on training data
-    
-    Args:
-        data: Training data (n_samples, n_features)
-        num_components: Number of PCA components to keep
-    
+    Perform Principal Component Analysis (PCA) on the input data.
+
+    Parameters:
+    - data (numpy.ndarray): The input data with shape (n_samples, n_features).
+    - num_components (int): The number of principal components to retain.
+
     Returns:
-        pca_params: Dictionary containing PCA parameters
-        data_reduced: PCA-transformed data
+    - data_reduced (numpy.ndarray): The data transformed into the reduced PCA space.
+    - top_k_eigenvectors (numpy.ndarray): The top k eigenvectors.
+    - sorted_eigenvalues (numpy.ndarray): The sorted eigenvalues.
     """
-    
-    # Standardize the data
+
+    # Step 1: Standardize the Data
     mean = np.mean(data, axis=0)
-    std = np.std(data, axis=0)
-    
-    # Avoid division by zero
-    std[std == 0] = 1.0
-    
-    data_standardized = (data - mean) / std
-    
-    # Fit PCA using sklearn
-    pca_model = PCA(n_components=num_components)
-    data_reduced = pca_model.fit_transform(data_standardized)
-    
-    # Create params dictionary
-    pca_params = {
-        'pca_model': pca_model,
-        'mean': mean,
-        'std': std,
-        'num_components': num_components,
-        'feature_dim': data.shape[1],
-        'explained_variance_ratio': pca_model.explained_variance_ratio_,
-        'cumulative_variance': np.cumsum(pca_model.explained_variance_ratio_)
-    }
-    
-    return pca_params, data_reduced
+    std_dev = np.std(data, axis=0)
 
+    #===========================
+    std_dev[std_dev == 0] = 1.0  # Avoid division by zero
+    #===========================
+    
+    data_standardized = (data - mean) / std_dev
 
-def apply_pca_transform(data, pca_params):
-    """
-    Apply saved PCA transformation to new data
-    CRITICAL: This uses the saved mean/std/PCA from training
-    
-    Args:
-        data: New data to transform (n_samples, n_features)
-        pca_params: Dictionary from fit_pca_transformer
-    
-    Returns:
-        Transformed data
-    """
-    
-    # Standardize using training mean/std
-    data_standardized = (data - pca_params['mean']) / pca_params['std']
-    
-    # Apply PCA transformation
-    data_reduced = pca_params['pca_model'].transform(data_standardized)
-    
+    # Step 2: Compute the Covariance Matrix
+    covariance_matrix = np.cov(data_standardized, rowvar=False)
+
+    # Step 3: Calculate Eigenvalues and Eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eig(covariance_matrix)
+
+    # Step 4: Sort Eigenvalues and Eigenvectors in descending order
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    sorted_eigenvalues = eigenvalues[sorted_indices]
+    sorted_eigenvectors = eigenvectors[:, sorted_indices]
+
+    # Step 5: Select the top k Eigenvectors
+    top_k_eigenvectors = sorted_eigenvectors[:, :num_components]
+
+    # Step 6: Transform the Data using the top k eigenvectors
+    data_reduced = np.dot(data_standardized, top_k_eigenvectors)
+
+    # Return the real part of the data (in case of numerical imprecision)
+    data_reduced = np.real(data_reduced)
+
     return data_reduced
-
 
 def train_svm_model(features, labels, test_size=0.2, kernel='rbf', C=1.0):
     """
@@ -259,23 +272,40 @@ def train_svm_model(features, labels, test_size=0.2, kernel='rbf', C=1.0):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+    from pathlib import Path
     
-    path = r"C:\Users\Valen\Documents\Git-Repositorys\TUHH\ISM\Baselines\phase_1a\images\b02_i02_ablauf_20240819_152543_left_0007.jpg"
-    image = cv2.imread(path)
-    
-    original = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # Wavelet transform of image, and plot approximation and details
-    titles = ['Approximation', ' Horizontal detail',
-            'Vertical detail', 'Diagonal detail']
-    coeffs2 = pywt.dwt2(original, 'bior1.3')
-    LL, (LH, HL, HH) = coeffs2
-    fig = plt.figure(figsize=(12, 3))
-    for i, a in enumerate([LL, LH, HL, HH]):
-        ax = fig.add_subplot(1, 4, i + 1)
-        ax.imshow(a, interpolation="nearest", cmap=plt.cm.gray)
-        ax.set_title(titles[i], fontsize=10)
-        ax.set_xticks([])
-        ax.set_yticks([])
+    TEST_IMAGE_PATH = str(Path(__file__).resolve().parents[2] / "images" / "b00_i01_a00_20240813_154501_left_0006.jpg")
+    #TEST_IMAGE_PATH = str(Path(__file__).resolve().parents[2] / "images" / "b02_i02_ablauf_20240819_151350_left_0022.jpg")
 
-    fig.tight_layout()
-    plt.show()
+    image = cv2.imread(TEST_IMAGE_PATH)
+    
+
+    filtered_image = filter_background(image)
+
+    cv2.imshow("filtered", filtered_image)
+    cv2.waitKey(0)
+
+    
+    # # might be unnecessary
+    # edges = cv2.Canny(np.uint8(image), 200, 400)
+    # cv2.imshow("edges", edges)
+    # cv2.waitKey(0)
+
+    # cv2.destroyAllWindows()
+
+    # original = cv2.cvtColor(filtered_image, cv2.COLOR_BGR2GRAY)
+    # # Wavelet transform of image, and plot approximation and details
+    # titles = ['Approximation', ' Horizontal detail',    
+    #         'Vertical detail', 'Diagonal detail']
+    # coeffs2 = pywt.dwt2(original, 'haar')
+    # LL, (LH, HL, HH) = coeffs2
+    # fig = plt.figure(figsize=(12, 3))
+    # for i, a in enumerate([LL, LH, HL, HH]):
+    #     ax = fig.add_subplot(1, 4, i + 1)
+    #     ax.imshow(a, interpolation="nearest", cmap=plt.cm.gray)
+    #     ax.set_title(titles[i], fontsize=10)
+    #     ax.set_xticks([])
+    #     ax.set_yticks([])
+
+    # fig.tight_layout()
+    # plt.show()
