@@ -60,8 +60,9 @@ if __name__ == "__main__":
     
     # Paths
     current_directory = os.path.dirname(os.path.abspath(__file__))
-    TEST_IMAGE_PATH = "/tmp/data/test_images"
-    
+    #TEST_IMAGE_PATH = "/tmp/data/test_images"
+    TEST_IMAGE_PATH = r"C:\Users\Valentin\Documents\GIT_REPS\TUHH\ISM\Baselines\phase_1a\images"
+
     MODEL_NAME = "multiclass_model.pkl"
     MODEL_PATH = os.path.join(current_directory, MODEL_NAME)
     

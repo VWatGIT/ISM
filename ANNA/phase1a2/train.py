@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     BASE_PATH = str(Path(__file__).resolve().parents[2])
     IMAGES_FOLDER = str(Path(BASE_PATH) / "Baselines" / "phase_1a" / "images")
-    SAVE_DIR = str(Path(BASE_PATH) / "Baselines" / "phase_1a" / "submission")
+    SAVE_DIR = str(Path(BASE_PATH) / "ANNA" / "phase1a2")
     GT_CSV = str(Path(BASE_PATH) / "Baselines" / "phase_1a" / "gt_for_classification_multiclass_from_filenames_0_index.csv")
 
 

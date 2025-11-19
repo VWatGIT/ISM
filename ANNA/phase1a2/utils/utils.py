@@ -175,6 +175,7 @@ def fit_pca_transformer(data, num_components):
     std[std == 0] = 1.0
     
     data_standardized = (data - mean) / std
+    data_standardized = np.nan_to_num(data_standardized, nan=0.0, posinf=0.0, neginf=0.0)
     
     # Fit PCA using sklearn
     pca_model = PCA(n_components=num_components)
