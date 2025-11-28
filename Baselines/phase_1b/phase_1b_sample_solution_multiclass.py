@@ -9,22 +9,35 @@ import timm
 from torchvision.transforms import ToTensor
 from sklearn.metrics import classification_report
 from submission.utils.utils import ImageData
-import torchvision.transforms as transforms
+import torchvision.transforms as transforms # maybe use v2?
 from PIL import Image
 
+from pathlib import Path
 
-BASE_PATH = "/datax/Maack/ism_2024_2025/sample_solution/phase_1b"
-PATH_TO_IMAGES = os.path.join(BASE_PATH, "images")
-PATH_TO_TRAIN_GT = os.path.join(BASE_PATH, "gt_for_classification_multiclass_from_filenames_0_index.csv")
+BASE_PATH = Path(__file__).parent
+PATH_TO_IMAGES = str(BASE_PATH / "images")
+PATH_TO_TRAIN_GT = str(BASE_PATH / "gt_for_classification_multiclass_from_filenames_0_index.csv")
+MODEL_SAVE_PATH = str(BASE_PATH / "submission" / "multiclass_model.pth")
+
 VAL_FRACTION = 0.1
 IMAGE_SIZE = (360, 640) # (H, W)
 MAX_EPOCHS = 4
 BATCH_SIZE = 32
 NUM_CLASSES = 3
 LEARNING_RATE = 0.001
-DEVICE = "cuda"
 
-MODEL_SAVE_PATH = "/datax/Maack/ism_2024_2025/sample_solution/phase_1b/submission/multiclass_model.pth"
+# choose device: prefer DirectML (Windows + AMD), else CUDA if available, else CPU
+# some pytorch functions are not supported on AMD GPUs :(
+try:
+    import torch_directml
+    DEVICE = torch_directml.device() 
+    print("Using DirectML device:", DEVICE)
+except Exception:
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", DEVICE)
+
+
+
 
 torch.manual_seed(0)
 
@@ -40,7 +53,25 @@ def main():
                 transforms.Resize(IMAGE_SIZE),
                 transforms.AugMix(),
                 # add other augmentation techniques here!
+
+
+                # ---- Geometric Augmentations ----
+                transforms.RandomRotation(degrees=10),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=0.5),  
+
+
+                # ---- Intensity Augmentations ----
+                transforms.ColorJitter(
+                    brightness=0.1,
+                    contrast=0.1
+                ),
+
+                # ---- Normalize with dataset stats ----
                 transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225]),
+
             ])
         
     val_transform = transforms.Compose([
@@ -120,3 +151,4 @@ if __name__ == "__main__":
     model = main()
     
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
+    print(f"Model saved to {MODEL_SAVE_PATH}")
