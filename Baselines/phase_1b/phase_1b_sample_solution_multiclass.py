@@ -9,22 +9,35 @@ import timm
 from torchvision.transforms import ToTensor
 from sklearn.metrics import classification_report
 from submission.utils.utils import ImageData
-import torchvision.transforms as transforms
+import torchvision.transforms as transforms # maybe use v2?
 from PIL import Image
 
+from pathlib import Path
 
-BASE_PATH = "/datax/Maack/ism_2024_2025/sample_solution/phase_1b"
-PATH_TO_IMAGES = os.path.join(BASE_PATH, "images")
-PATH_TO_TRAIN_GT = os.path.join(BASE_PATH, "gt_for_classification_multiclass_from_filenames_0_index.csv")
+BASE_PATH = Path(__file__).parent
+PATH_TO_IMAGES = str(BASE_PATH / "images")
+PATH_TO_TRAIN_GT = str(BASE_PATH / "gt_for_classification_multiclass_from_filenames_0_index.csv")
+MODEL_SAVE_PATH = str(BASE_PATH / "submission" / "multiclass_model.pth")
+
 VAL_FRACTION = 0.1
 IMAGE_SIZE = (360, 640) # (H, W)
-MAX_EPOCHS = 4
-BATCH_SIZE = 32
+MAX_EPOCHS = 10
+BATCH_SIZE = 16
 NUM_CLASSES = 3
 LEARNING_RATE = 0.001
-DEVICE = "cuda"
 
-MODEL_SAVE_PATH = "/datax/Maack/ism_2024_2025/sample_solution/phase_1b/submission/multiclass_model.pth"
+# choose device: prefer DirectML (Windows + AMD), else CUDA if available, else CPU
+# some pytorch functions are not supported on AMD GPUs :(
+try:
+    import torch_directml
+    DEVICE = torch_directml.device() 
+    print("Using DirectML device:", DEVICE)
+except Exception:
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", DEVICE)
+
+
+
 
 torch.manual_seed(0)
 
@@ -40,12 +53,33 @@ def main():
                 transforms.Resize(IMAGE_SIZE),
                 transforms.AugMix(),
                 # add other augmentation techniques here!
+
+
+                # ---- Geometric Augmentations ----
+                transforms.RandomRotation(degrees=10),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=0.5),  
+
+
+                # ---- Intensity Augmentations ----
+                transforms.ColorJitter(
+                    brightness=0.1,
+                    contrast=0.1
+                ),
+
+                # ---- Normalize with dataset stats ----
                 transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                #                     std=[0.229, 0.224, 0.225]), # TODO calculate dataset mean and std
+
             ])
         
     val_transform = transforms.Compose([
+                transforms.Lambda(lambda img: img.convert("RGB")),
                 transforms.Resize(IMAGE_SIZE),
                 transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                #                      std=[0.229, 0.224, 0.225]),
             ])
     
     train_dataset = ImageData(img_dir=PATH_TO_IMAGES, annotation_file=PATH_TO_TRAIN_GT, validation_set=False, transform=training_tranform)
@@ -56,7 +90,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
     
     # create your own model or use excisting architectures from timm or torchvision libaries!
-    model = timm.create_model('resnet18', pretrained=True, num_classes=NUM_CLASSES)
+    model = timm.create_model('resnet50', pretrained=True, num_classes=NUM_CLASSES)
     model = model.to(DEVICE)
     
     # define the loss function
@@ -120,3 +154,4 @@ if __name__ == "__main__":
     model = main()
     
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
+    print(f"Model saved to {MODEL_SAVE_PATH}")

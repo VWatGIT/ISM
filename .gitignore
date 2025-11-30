@@ -10,7 +10,7 @@ How_To_Videos
 
 *.jpg
 *.png
-
+*.pth
 
 # some models are large files
 model

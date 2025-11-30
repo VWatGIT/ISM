@@ -87,6 +87,33 @@ def luv_histogram(image, bins=32):
         hist_features.append(hist)
     return np.concatenate(hist_features)
 
+def _filter_background(image):
+
+    # convert to hsv color space
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    # define range for surgical instrument colors
+    lower_bound = np.array([0, 0, 0])
+    upper_bound = np.array([360, 70, 100])
+
+    # create mask
+    mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    # apply mask
+    filtered_image = cv2.bitwise_and(image, image, mask=mask)
+    return filtered_image
+
+
+def filtered_hsv_histogram(image):
+    """Extract HSV histogram features"""
+    filtered_image = _filter_background(image)
+    hsv = cv2.cvtColor(filtered_image, cv2.COLOR_BGR2HSV)
+    hist_features = []
+    for i in range(3):  # HSV Channels
+        hist, _ = np.histogram(hsv[:, :, i], bins=256, range=(0, 256), density=True)
+        hist_features.append(hist)
+    return np.concatenate(hist_features)
+
+
+
 
 def extract_features_from_image(image):
     """
@@ -109,6 +136,9 @@ def extract_features_from_image(image):
     # Enhanced features
     hog_feat = hog_features(image)
     luv_hist = luv_histogram(image)
+
+    # filtered background
+    hsv_hist = filtered_hsv_histogram(image)
     
     # Concatenate all features
     image_features = np.concatenate([
@@ -117,7 +147,8 @@ def extract_features_from_image(image):
         glcm_features_vector,
         lbp_features,
         hog_feat,
-        luv_hist
+        luv_hist,
+        hsv_hist
     ])
     
     return image_features
@@ -144,6 +175,7 @@ def fit_pca_transformer(data, num_components):
     std[std == 0] = 1.0
     
     data_standardized = (data - mean) / std
+    data_standardized = np.nan_to_num(data_standardized, nan=0.0, posinf=0.0, neginf=0.0)
     
     # Fit PCA using sklearn
     pca_model = PCA(n_components=num_components)

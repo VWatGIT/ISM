@@ -141,13 +141,20 @@ def train_and_save_model(base_path, images_folder, gt_csv, save_dir, n_component
 
 
 if __name__ == "__main__":
-    
     # CONFIGURATION - Adjust these paths to your setup
-    BASE_PATH = "C:/Users/anna2/ISM/ANNA/phase1a2"
-    IMAGES_FOLDER = "C:/Users/anna2/ISM/Images"
-    GT_CSV = "C:/Users/anna2/ISM/Baselines/phase_1a/gt_for_classification_multiclass_from_filenames_0_index.csv"
-    
-    SAVE_DIR = "C:/Users/anna2/ISM/ANNA/phase1a2/submission"
+    from pathlib import Path
+
+    BASE_PATH = str(Path(__file__).resolve().parents[2])
+    IMAGES_FOLDER = str(Path(BASE_PATH) / "Baselines" / "phase_1a" / "images")
+    SAVE_DIR = str(Path(BASE_PATH) / "ANNA" / "phase1a2")
+    GT_CSV = str(Path(BASE_PATH) / "Baselines" / "phase_1a" / "gt_for_classification_multiclass_from_filenames_0_index.csv")
+
+
+    #BASE_PATH = "C:/Users/anna2/ISM/ANNA/phase1a2"
+    #IMAGES_FOLDER = "C:/Users/anna2/ISM/Images"
+    #GT_CSV = "C:/Users/anna2/ISM/Baselines/phase_1a/gt_for_classification_multiclass_from_filenames_0_index.csv"
+
+    #SAVE_DIR = "C:/Users/anna2/ISM/ANNA/phase1a2/submission"
     
     # Number of PCA components
     N_COMPONENTS = 100
