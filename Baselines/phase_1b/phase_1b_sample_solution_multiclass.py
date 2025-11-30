@@ -9,9 +9,10 @@ import timm
 from torchvision.transforms import ToTensor
 from sklearn.metrics import classification_report
 from submission.utils.utils import ImageData
-import torchvision.transforms as transforms # maybe use v2?
+import torchvision.transforms as transforms # maybe use v2? # maybe use v2?
 from PIL import Image
 
+from pathlib import Path
 from pathlib import Path
 
 BASE_PATH = Path(__file__).parent
@@ -71,6 +72,9 @@ def main():
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406],
                 #                     std=[0.229, 0.224, 0.225]), # TODO calculate dataset mean and std
+
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225]),
 
             ])
         
