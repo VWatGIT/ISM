@@ -95,7 +95,8 @@ if __name__ == "__main__":
     # Configure the model. More information here: https://huggingface.co/docs/transformers/model_doc/grounding-dino
     # If you want to use another model - you need to make it avaible for offline usage. More information here: https://huggingface.co/docs/transformers/installation#offline-mode
     model_id = "IDEA-Research/grounding-dino-tiny"
-    device = "cuda"
+    #device = torch.device("cuda")
+    device = torch.device("cpu")
     processor = AutoProcessor.from_pretrained(os.path.join(current_directory, "processor"))
     model = AutoModelForZeroShotObjectDetection.from_pretrained(os.path.join(current_directory, "model"))
     
@@ -109,7 +110,7 @@ if __name__ == "__main__":
     parent_directory = os.path.dirname(current_directory)
     PATH_TO_TRAINING_IMAGES_FOR_FOR_VISUALIZATION = os.path.join(parent_directory, "images")
     visualization_path = os.path.join(parent_directory, "outputs")
-    visualize_results = False
+    visualize_results = True
     if visualize_results:
         if os.path.exists(visualization_path):
             os.system("rm -rf " + visualization_path)
