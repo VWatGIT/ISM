@@ -157,9 +157,9 @@ if __name__ == "__main__":
     edge_order = np.argsort(edge_proj)
     edge_coords_sorted = edge_coords[edge_order]
     # compare corner brightness
-    corner_size = 500
+    corner_size = 100
     end_1 = edge_coords_sorted[:corner_size]
-    end_2 = edge_coords_sorted[-corner_size:]
+    end_2 = edge_coords_sorted[-(corner_size+1):]
     mean_1 = np.mean([gray[int(p[1]), int(p[0])] for p in end_1])
     mean_2 = np.mean([gray[int(p[1]), int(p[0])] for p in end_2])
 
@@ -180,33 +180,40 @@ if __name__ == "__main__":
     low_q = 0.2
     high_q = 0.6
 
-    r = int(0.2 * max(cropped_img.shape[:2]))  # 2% of size
+    r = int(0.02 * max(cropped_img.shape[:2]))  # 2% of size
     r = max(r, 5)
 
     densities = np.array([
         local_density(p, edges, r) for p in edge_coords_sorted
     ])
 
-    low_th = np.quantile(densities, low_q)
-    high_th = np.quantile(densities, high_q)
+    i_transition = np.argmax(densities) # WIll this work?
 
-    i_transition = None
-    for i in range(len(densities)):
-        if densities[i] > high_th:
-            i_transition = i
-            break
-    
-    def find_nearest_corner(point, box): #TODO
+    # low_th = np.quantile(densities, low_q)
+    # high_th = np.quantile(densities, high_q)
+
+    # if tip_side == -1:
+    #     densities = densities[::-1]
+    # i_transition = None
+    # for i in range(len(densities)): # TODO direction based on tip side
+    #     if densities[i] > high_th:
+    #         i_transition = i
+    #         break
+
+
+        
+    def find_nearest_corner(point, box): #TODO fix corner selection
         x, y = point
         xmin, ymin, xmax, ymax = box
-        corners = np.array([
-            [0, 0],
-            [0, ymax-ymin],
-            [xmax-xmin, 0],
-            [xmax-xmin, ymax-ymin],
-        ])
-        dists = np.linalg.norm(corners - point)
-        return corners[np.argmin(dists)]
+        w = int(xmax - xmin); h = int(ymax - ymin)
+
+        # corners in crop-local coords (x,y)
+        corners_crop = np.array([[0, 0], [w-1, 0], [0, h-1], [w-1, h-1]], dtype=float)
+
+        dists = np.linalg.norm(corners_crop - point, axis=1)
+        print("dists to corners:", dists)
+        print(corners_crop[np.argmin(dists)])
+        return corners_crop[np.argmin(dists)]
 
 
     if tip_side == 0:
@@ -220,9 +227,11 @@ if __name__ == "__main__":
 
     xmin = int(min(tip_corner[0], transition_point[0]))
     xmax = int(max(tip_corner[0], transition_point[0]))
-    ymin = int(min(tip_corner[1], transition_point[1]))
+    ymin = int(min(tip_corner[1], transition_point[1])) 
     ymax = int(max(tip_corner[1], transition_point[1]))
 
+    tip_box = [xmin, ymin, xmax, ymax]
+    
     # Visualize
     img_vis = cropped_img.copy()
 
@@ -254,6 +263,9 @@ if __name__ == "__main__":
 
     cv2.circle(img_vis, (int(tip_point[0]), int(tip_point[1])), 5, (0, 0, 255), -1)
     cv2.circle(img_vis, (int(tip_corner[0]), int(tip_corner[1])), 5, (255, 0, 255), -1)
+    cv2.putText(img_vis, "tip corner", (int(tip_corner[0])+10, int(tip_corner[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+    cv2.putText(img_vis, "tip point", (int(tip_point[0])+10, int(tip_point[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+    cv2.putText(img_vis, "transition", (int(transition_point[0])+10, int(transition_point[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
     cv2.circle(img_vis, (int(transition_point[0]), int(transition_point[1])), 5, (255, 0, 0), -1)
     cv2.rectangle(img_vis, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
     cv2.imshow("tip detection", img_vis)
