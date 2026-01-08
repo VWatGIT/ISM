@@ -35,31 +35,23 @@ def xywh_to_xyxy(box):
     x, y, w, h = box
     return [x, y, x + w, y + h]
 
-def filter_by_size(box, img):
-    xmin, ymin, xmax, ymax = box
-    w = xmax - xmin
-    h = ymax - ymin
-    img_w, img_h = img.size
+def rerun_dino_on_crop(cropped_img, model, processor, box_threshold, text_threshold, device):
+    new_prompt = "detailed tip of surgical instrument"
+    inputs_tip = processor(images=cropped_img, text=new_prompt,return_tensors="pt").to(device)
 
-    size_threshold = 0.80
-    if w > size_threshold * img_w and h > size_threshold * img_h:
-        return True
-    return False
+    with torch.no_grad():
+        outputs = model(**inputs_tip)
+        
+    new_results = processor.post_process_grounded_object_detection(
+        outputs,
+        inputs_tip.input_ids,
+        threshold=box_threshold,
+        text_threshold=text_threshold,
+        target_sizes=[cropped_img.size[::-1]]
+    )
+    return new_results
 
-
-
-def post_process_tip_boxes(img: Image.Image, results):
-
-    for result in results:
-        boxes = result["boxes"]
-        result["old_boxes"] = boxes.clone()
-        new_boxes = []
-        for i, _ in enumerate(range(len(boxes))):
-            box = boxes[i].tolist()
-
-            if filter_by_size(box, img):
-                continue
-
+def density_box(img, box):
             # crop image
             xmin, ymin, xmax, ymax = box            
             cropped_img = img.crop((xmin, ymin, xmax, ymax))
@@ -121,18 +113,112 @@ def post_process_tip_boxes(img: Image.Image, results):
             ymin = int(min(tip_corner[1], transition_point[1])) 
             ymax = int(max(tip_corner[1], transition_point[1]))
 
-            tip_box = [xmin, ymin, xmax, ymax]
-            tip_box_global = [
-                tip_box[0] + box[0],
-                tip_box[1] + box[1],
-                tip_box[2] + box[0],
-                tip_box[3] + box[1],
+            new_box = [xmin, ymin, xmax, ymax]
+            new_box_global = [
+                new_box[0] + box[0],
+                new_box[1] + box[1],
+                new_box[2] + box[0],
+                new_box[3] + box[1],
             ]
-            new_boxes.append(tip_box_global)
 
-        result["boxes"] = torch.tensor(new_boxes, dtype=torch.float32)
+            return new_box_global
+
+
+def box_area(box):
+    xmin, ymin, xmax, ymax = box
+    return (xmax - xmin) * (ymax - ymin)
+
+
+def score_boxes(img: Image.Image, boxes):
+
+    def aspect_score(box):
+        xmin, ymin, xmax, ymax = box.tolist()
+        w = xmax - xmin
+        h = ymax - ymin
+        aspect_ratio = w / h if h > 0 else 0
+        ideal_aspect_ratio = 1.0  # assuming square boxes are ideal
+        score = abs(aspect_ratio - ideal_aspect_ratio)
+        return score
+
+    def size_score(box, img):
+        xmin, ymin, xmax, ymax = box.tolist()
+        w = xmax - xmin
+        h = ymax - ymin
+        area = w * h
+        img_area = img.size[0] * img.size[1]
+
+        if area < 0.01 * img_area:
+            score = -np.inf
+        elif area > 0.9 * img_area:
+            score = -np.inf
+        else:
+            score = 0
+        return score
+
+    def edge_distance_score(box, img):
+
+        xmin, ymin, xmax, ymax = box.tolist()
+        image_width, image_height = img.size
+        distances = [
+            xmin,  # distance to left edge
+            xmin + image_width - xmax,  # distance to right edge
+            ymin,  # distance to top edge
+            ymin + image_height - ymax  # distance to bottom edge
+        ]
+
+        min_distance = min(distances)
+        score = min_distance
+        return score
+
+    def relative_size_score(box, boxes):
+        areas = [box_area(box.tolist()) for box in boxes]
+        max_area = max(areas) 
+        min_area = min(areas)
+
+        # best if box is in the middle of min and max
+        optimal_area = (max_area + min_area) / 2
+
+        box_area_value = box_area(box.tolist())
+        score = -abs(box_area_value - optimal_area)
+        return score
+
+
+    relative_size_scores = np.array([relative_size_score(box, boxes) for box in boxes])
+    edge_distance_scores = np.array([edge_distance_score(box, img) for box in boxes])
+    aspect_scores = np.array([aspect_score(box) for box in boxes])
+    size_scores = np.array([size_score(box, img) for box in boxes])
+
+    total_scores = 1*relative_size_scores + 1*edge_distance_scores + 1*aspect_scores + 1*size_scores
+
+    return total_scores
+
+
+def post_process_tip_boxes(img: Image.Image, results):
+
+    for result in results:
+        boxes = result["boxes"]
+        result["old_boxes"] = boxes.clone()
+        tip_boxes = []
+
+        if len(boxes) == 0:
+            result["boxes"] = torch.tensor(tip_boxes, dtype=torch.float32)
+            continue
+
+        # score boxes
+        scores = score_boxes(img, boxes)
+        best_index = np.argmax(scores)
+        print("Box scores:", scores)
+        print("Selected box index:", best_index)
+
+
+        tip_box = boxes[best_index].tolist()
+        # new_box = density_box(img, box)
+            
+        tip_boxes.append(tip_box)
+
+        result["boxes"] = torch.tensor(tip_boxes, dtype=torch.float32)
+        result["scores"] = torch.tensor(scores, dtype=torch.float32)
     return results
-    
 
 def run_inference(image_path, model, save_path, prompt, box_threshold, text_threshold,
                   visualize_results, visualization_path, device):
@@ -144,7 +230,9 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
     category_ids = []
     test_images_names = []
     
-    for image_name in tqdm(test_images[28:]): # [30:]
+    test_images = list(np.random.permutation(test_images)) # TODO comment out for submission
+
+    for image_name in tqdm(test_images):
         
         test_images_names.append(image_name)
         bbox = []
@@ -167,71 +255,52 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
 
         # #_______________________
         # # post process tip boxes
-        # results = post_process_tip_boxes(img, results)
+        results = post_process_tip_boxes(img, results)
         # #__________________
 
-
-        #_______________
-        # run dino again for tip
-        for result in results:
-            boxes = result["boxes"]
-            result["old_boxes"] = boxes.clone()
-
-            for i, _ in enumerate(range(len(boxes))):
-                box = boxes[i].tolist()
-
-                # crop image 
-                xmin, ymin, xmax, ymax = box
-                cropped_img = img.crop((xmin, ymin, xmax, ymax))
-                # run dino again
-                new_prompt = "detailed tip of surgical instrument"
-                inputs_tip = processor(images=cropped_img, text=new_prompt,return_tensors="pt").to(device)
-
-                with torch.no_grad():
-                    outputs = model(**inputs_tip)
-                    
-                new_results = processor.post_process_grounded_object_detection(
-                    outputs,
-                    inputs_tip.input_ids,
-                    threshold=box_threshold,
-                    text_threshold=text_threshold,
-                    target_sizes=[img.size[::-1]]
-                )
-
-                if len(new_results[0]["boxes"]) > 0:
-                    # adjust box to global coords
-                    new_box = new_results[0]["boxes"][0].tolist()
-                    new_box_global = [
-                        new_box[0] + xmin,
-                        new_box[1] + ymin,
-                        new_box[2] + xmin,
-                        new_box[3] + ymin,
-                    ]
-
-                    boxes[i] = torch.tensor(new_box_global, dtype=torch.float32)
-                
-
-        #______________
 
         # visualize results
         if visualize_results:
             draw = ImageDraw.Draw(img)
             print(image_name)
             print(results)
-            
+        
             for result in results:
-                boxes = result["boxes"]
-                for i, _ in enumerate(range(len(boxes))):
-                    box = boxes[i].tolist()
-                    label = result["labels"][i]
-                    draw.rectangle(box, outline="red", width=3, )
+                boxes = result.get("boxes", [])
+                labels = result.get("labels", [])
+                scores = result.get("scores", None)
 
-                    #_____
-                    draw.rectangle(result["old_boxes"][i].tolist(), outline="blue", width=3)
-                    #_____
+                # fallback if no scores present
+                if scores is None:
+                    scores = torch.ones(len(boxes), dtype=torch.float32)
+                else:
+                    scores = scores.clone()
+
+                scores_list = [float(s) for s in scores]
+                best_idx = int(np.argmax(scores_list)) if len(scores_list) > 0 else -1
+
+                for i in range(len(boxes)):
+                    box = boxes[i].tolist()
+                    score = scores_list[i]
+                    xmin, ymin, xmax, ymax = [int(v) for v in box]
+
+                    # highlight best box in blue, others in red
+                    outline_color = "blue" if i == best_idx else "red"
+                    outline_width = 6 if i == best_idx else 3
+                    draw.rectangle([xmin, ymin, xmax, ymax], outline=outline_color, width=outline_width)
+
+                    # draw score
+                    text = f"{score:.2f}"
+                    text_pos = (xmin, max(0, ymin - 14))
+                    draw.text(text_pos, text, fill="white")
+
+            for old_box in result.get("old_boxes", []):
+                box = old_box.tolist()
+                xmin, ymin, xmax, ymax = [int(v) for v in box]
+                draw.rectangle([xmin, ymin, xmax, ymax], outline="green", width=2)
 
             img.save(os.path.join(visualization_path, image_name))
-        
+                
         for result in results:
             boxes = result["boxes"]
             labels = result["labels"]
@@ -282,9 +351,10 @@ if __name__ == "__main__":
     
     model.to(device)
     
-    BOX_THRESHOLD = 0.35
-    TEXT_THRESHOLD = 0.2
-    PROMPT = "surgical instrument"
+    BOX_THRESHOLD = 0.15
+    TEXT_THRESHOLD = 0.5 # 0.2 
+    PROMPT = "articulated surgical instrument tip."
+    #PROMPT = "surgical instrument."
     
     # If you want to test out your model on training images and visualize the results, set visualize_results to True - Visualization images will be saved in the "outputs" folder
     parent_directory = os.path.dirname(current_directory)
