@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import cv2
 
-
+"""
 def find_nearest_corner(point, box): 
     x, y = point
     xmin, ymin, xmax, ymax = box
@@ -123,11 +123,47 @@ def density_box(img, box):
 
             return new_box_global
 
+"""
+
+def _normalize_boxes(boxes):
+    if isinstance(boxes, torch.Tensor):
+        boxes_list = [b.tolist() for b in boxes]
+    else:
+        boxes_list = [b.tolist() if hasattr(b, "tolist") else list(b) for b in boxes]
+    return [[float(v) for v in b] for b in boxes_list]
+
+
+def is_overlapping(box1, box2):
+    x11, y11, x12, y12 = box1
+    x21, y21, x22, y22 = box2
+    
+    # Check if they overlap or touch
+    return not (x12 < x21 or x11 > x22 or y12 < y21 or y11 > y22)
+
+def is_contained(box1, box2):
+    # Check if box1 is fully inside box2
+    x11, y11, x12, y12 = box1
+    x21, y21, x22, y22 = box2
+    return x21 <= x11 and y21 <= y11 and x12 <= x22 and y12 <= y22
+
+def find_independent_boxes(boxes):
+    independent_indices = []
+    for i, box in enumerate(_normalize_boxes(boxes)):
+        touches_or_contains = False
+        for j, other in enumerate(boxes):
+            if i == j:
+                continue
+            if is_overlapping(box, other) or is_contained(box, other) or is_contained(other, box):
+                touches_or_contains = True
+                break
+        if not touches_or_contains:
+            independent_indices.append(i)
+    return independent_indices
+
 
 def box_area(box):
     xmin, ymin, xmax, ymax = box
     return (xmax - xmin) * (ymax - ymin)
-
 
 def score_boxes(img: Image.Image, boxes):
 
@@ -141,10 +177,7 @@ def score_boxes(img: Image.Image, boxes):
         return score
 
     def size_score(box, img):
-        xmin, ymin, xmax, ymax = box.tolist()
-        w = xmax - xmin
-        h = ymax - ymin
-        area = w * h
+        area = box_area(box.tolist())
         img_area = img.size[0] * img.size[1]
 
         if area < 0.01 * img_area:
@@ -212,9 +245,13 @@ def post_process_tip_boxes(img: Image.Image, results):
 
 
         tip_box = boxes[best_index].tolist()
-        # new_box = density_box(img, box)
-            
         tip_boxes.append(tip_box)
+        # new_box = density_box(img, box)
+
+        independent_indices = find_independent_boxes(boxes)
+        if independent_indices:
+            independent_box = boxes[independent_indices[0]].tolist()
+            tip_boxes.append(independent_box)
 
         result["boxes"] = torch.tensor(tip_boxes, dtype=torch.float32)
         result["scores"] = torch.tensor(scores, dtype=torch.float32)
@@ -266,6 +303,7 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
             print(results)
         
             for result in results:
+                old_boxes = result.get("old_boxes", [])
                 boxes = result.get("boxes", [])
                 labels = result.get("labels", [])
                 scores = result.get("scores", None)
@@ -281,23 +319,22 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
 
                 for i in range(len(boxes)):
                     box = boxes[i].tolist()
-                    score = scores_list[i]
                     xmin, ymin, xmax, ymax = [int(v) for v in box]
+                    draw.rectangle([xmin, ymin, xmax, ymax], outline="red", width=5)
+            
 
-                    # highlight best box in blue, others in red
-                    outline_color = "blue" if i == best_idx else "red"
-                    outline_width = 6 if i == best_idx else 3
-                    draw.rectangle([xmin, ymin, xmax, ymax], outline=outline_color, width=outline_width)
+                for i in range(len(old_boxes)):
+                    score = scores_list[i]
+                    box = old_boxes[i].tolist()
+                    xmin, ymin, xmax, ymax = [int(v) for v in box]
+                    draw.rectangle([xmin, ymin, xmax, ymax], outline="blue", width=2)
 
                     # draw score
                     text = f"{score:.2f}"
                     text_pos = (xmin, max(0, ymin - 14))
                     draw.text(text_pos, text, fill="white")
 
-            for old_box in result.get("old_boxes", []):
-                box = old_box.tolist()
-                xmin, ymin, xmax, ymax = [int(v) for v in box]
-                draw.rectangle([xmin, ymin, xmax, ymax], outline="green", width=2)
+
 
             img.save(os.path.join(visualization_path, image_name))
                 
@@ -360,7 +397,7 @@ if __name__ == "__main__":
     parent_directory = os.path.dirname(current_directory)
     PATH_TO_TRAINING_IMAGES_FOR_FOR_VISUALIZATION = os.path.join(parent_directory, "images")
     visualization_path = os.path.join(parent_directory, "outputs")
-    visualize_results = True
+    visualize_results = False # TODO set to False for submission
     if visualize_results:
         if os.path.exists(visualization_path):
             os.system("rm -rf " + visualization_path)
