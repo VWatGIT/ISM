@@ -1,4 +1,4 @@
-from sklearn.decomposition import PCA
+#from sklearn.decomposition import PCA
 import torch
 from PIL import Image, ImageDraw
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
@@ -8,7 +8,7 @@ import os
 import pandas as pd
 
 import numpy as np
-import cv2
+#import cv2
 
 """
 def find_nearest_corner(point, box): 
@@ -146,7 +146,7 @@ def is_contained(box1, box2):
     x21, y21, x22, y22 = box2
     return x21 <= x11 and y21 <= y11 and x12 <= x22 and y12 <= y22
 
-def find_independent_boxes(boxes):
+def find_independent_boxes(boxes): # TODO only compare to tip boxes?
     independent_indices = []
     for i, box in enumerate(_normalize_boxes(boxes)):
         touches_or_contains = False
@@ -231,6 +231,7 @@ def post_process_tip_boxes(img: Image.Image, results):
     for result in results:
         boxes = result["boxes"]
         result["old_boxes"] = boxes.clone()
+        result["old_scores"] = result["scores"].clone()
         tip_boxes = []
 
         if len(boxes) == 0:
@@ -240,16 +241,27 @@ def post_process_tip_boxes(img: Image.Image, results):
         # score boxes
         scores = score_boxes(img, boxes)
         best_index = np.argmax(scores)
+
+        # only use custom score if dino score is dino confidence is higher than 50% of dinos best box
+        dino_scores = result["scores"].cpu().numpy()
+        dino_best_index = int(np.argmax(dino_scores))
+        if dino_scores[best_index] < 0.4 * dino_scores[dino_best_index]:
+            best_index = dino_best_index
+
         print("Box scores:", scores)
-        print("Selected box index:", best_index)
+        
 
-
-        tip_box = boxes[best_index].tolist()
-        tip_boxes.append(tip_box)
+        if scores[best_index] != -np.inf: #  avoid selecting the whole image as a box
+            tip_box = boxes[best_index].tolist()
+            tip_boxes.append(tip_box)
+            print("Selected box index:", best_index)
+        else:
+            print("No suitable tip box found based on scoring.")
+            
         # new_box = density_box(img, box)
 
         independent_indices = find_independent_boxes(boxes)
-        if independent_indices:
+        if independent_indices and scores[independent_indices[0]] != -np.inf:
             independent_box = boxes[independent_indices[0]].tolist()
             tip_boxes.append(independent_box)
 
@@ -267,7 +279,10 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
     category_ids = []
     test_images_names = []
     
-    test_images = list(np.random.permutation(test_images)) # TODO comment out for submission
+    if test == True:    # test defined outside function 
+        pass
+        #test_images = list(np.random.permutation(test_images)) # TODO comment out for submission
+
 
     for image_name in tqdm(test_images):
         
@@ -304,6 +319,7 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
         
             for result in results:
                 old_boxes = result.get("old_boxes", [])
+                old_scores = result.get("old_scores", [])
                 boxes = result.get("boxes", [])
                 labels = result.get("labels", [])
                 scores = result.get("scores", None)
@@ -314,8 +330,11 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
                 else:
                     scores = scores.clone()
 
-                scores_list = [float(s) for s in scores]
-                best_idx = int(np.argmax(scores_list)) if len(scores_list) > 0 else -1
+                if old_scores is not None and len(old_scores) > 0:
+                    dino_scores_list = [float(s) for s in old_scores]
+                    best_dino_idx = int(np.argmax(dino_scores_list))
+                else:
+                    best_dino_idx = -1
 
                 for i in range(len(boxes)):
                     box = boxes[i].tolist()
@@ -324,15 +343,20 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
             
 
                 for i in range(len(old_boxes)):
-                    score = scores_list[i]
                     box = old_boxes[i].tolist()
                     xmin, ymin, xmax, ymax = [int(v) for v in box]
-                    draw.rectangle([xmin, ymin, xmax, ymax], outline="blue", width=2)
-
-                    # draw score
-                    text = f"{score:.2f}"
+                    
+                    # Highlight the box with highest DINO confidence in green
+                    if i == best_dino_idx:
+                        draw.rectangle([xmin, ymin, xmax, ymax], outline="green", width=4)
+                        score_text = f"DINO: {dino_scores_list[i]:.3f}"
+                    # else:
+                    #     draw.rectangle([xmin, ymin, xmax, ymax], outline="blue", width=2)
+                    #     score_text = f"{dino_scores_list[i]:.3f}" if i < len(dino_scores_list) else ""
+                    
+                    # Draw score
                     text_pos = (xmin, max(0, ymin - 14))
-                    draw.text(text_pos, text, fill="white")
+                    draw.text(text_pos, score_text, fill="white")
 
 
 
@@ -367,6 +391,8 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
 
 if __name__ == "__main__":
 
+    test = True  # TODO set to False for submission
+
     # The following environment variables are required for offline mode during HuggingFace Submission
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -380,9 +406,12 @@ if __name__ == "__main__":
     # If you want to use another model - you need to make it avaible for offline usage. More information here: https://huggingface.co/docs/transformers/installation#offline-mode
     model_id = "IDEA-Research/grounding-dino-tiny"
     
-    #device = torch.device("cuda")
+
+    if test == True:
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda")
     
-    device = torch.device("cpu")
     processor = AutoProcessor.from_pretrained(os.path.join(current_directory, "processor"))
     model = AutoModelForZeroShotObjectDetection.from_pretrained(os.path.join(current_directory, "model"))
     
@@ -397,7 +426,11 @@ if __name__ == "__main__":
     parent_directory = os.path.dirname(current_directory)
     PATH_TO_TRAINING_IMAGES_FOR_FOR_VISUALIZATION = os.path.join(parent_directory, "images")
     visualization_path = os.path.join(parent_directory, "outputs")
-    visualize_results = False # TODO set to False for submission
+    if test == True:
+        visualize_results = True  
+    else:
+        visualize_results = False
+
     if visualize_results:
         if os.path.exists(visualization_path):
             os.system("rm -rf " + visualization_path)
