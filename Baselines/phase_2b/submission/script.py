@@ -146,19 +146,45 @@ def is_contained(box1, box2):
     x21, y21, x22, y22 = box2
     return x21 <= x11 and y21 <= y11 and x12 <= x22 and y12 <= y22
 
-def find_independent_boxes(boxes): # TODO only compare to tip boxes?
-    independent_indices = []
-    for i, box in enumerate(_normalize_boxes(boxes)):
-        touches_or_contains = False
-        for j, other in enumerate(boxes):
-            if i == j:
-                continue
-            if is_overlapping(box, other) or is_contained(box, other) or is_contained(other, box):
-                touches_or_contains = True
-                break
-        if not touches_or_contains:
-            independent_indices.append(i)
-    return independent_indices
+def find_box_clusters(boxes):
+    """
+    Group boxes into clusters where boxes in the same cluster overlap/touch each other.
+    Returns a list of clusters, where each cluster is a list of box indices.
+    """
+    if len(boxes) == 0:
+        return []
+    
+    normalized_boxes = _normalize_boxes(boxes)
+    n = len(normalized_boxes)
+    
+    # Build adjacency list
+    adjacent = [set() for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            if is_overlapping(normalized_boxes[i], normalized_boxes[j]) or \
+               is_contained(normalized_boxes[i], normalized_boxes[j]) or \
+               is_contained(normalized_boxes[j], normalized_boxes[i]):
+                adjacent[i].add(j)
+                adjacent[j].add(i)
+    
+    # Find connected components using DFS
+    visited = [False] * n
+    clusters = []
+    
+    def dfs(node, cluster):
+        visited[node] = True
+        cluster.append(node)
+        for neighbor in adjacent[node]:
+            if not visited[neighbor]:
+                dfs(neighbor, cluster)
+    
+    for i in range(n):
+        if not visited[i]:
+            cluster = []
+            dfs(i, cluster)
+            clusters.append(cluster)
+    
+    return clusters
 
 
 def box_area(box):
@@ -250,7 +276,6 @@ def post_process_tip_boxes(img: Image.Image, results):
 
         print("Box scores:", scores)
         
-
         if scores[best_index] != -np.inf: #  avoid selecting the whole image as a box
             tip_box = boxes[best_index].tolist()
             tip_boxes.append(tip_box)
@@ -258,12 +283,28 @@ def post_process_tip_boxes(img: Image.Image, results):
         else:
             print("No suitable tip box found based on scoring.")
             
-        # new_box = density_box(img, box)
-
-        independent_indices = find_independent_boxes(boxes) # TODO 
-        if independent_indices and scores[independent_indices[0]] != -np.inf:
-            independent_box = boxes[independent_indices[0]].tolist()
-            tip_boxes.append(independent_box)
+        # Find box clusters (groups of overlapping boxes)
+        clusters = find_box_clusters(boxes)
+        print(f"Found {len(clusters)} box clusters")
+        
+        # For each cluster, select the best box
+        selected_indices = set()
+        if best_index in range(len(boxes)):
+            selected_indices.add(best_index)
+        
+        for cluster in clusters:
+            # Find which cluster contains the already selected box
+            if best_index in cluster:
+                continue  # Skip this cluster, already selected a box from it
+            
+            # Select the best box from this cluster
+            cluster_scores = [scores[i] for i in cluster]
+            if max(cluster_scores) != -np.inf:
+                best_in_cluster = cluster[np.argmax(cluster_scores)]
+                if best_in_cluster not in selected_indices:
+                    tip_boxes.append(boxes[best_in_cluster].tolist())
+                    selected_indices.add(best_in_cluster)
+                    print(f"Selected box index {best_in_cluster} from independent cluster")
 
         result["boxes"] = torch.tensor(tip_boxes, dtype=torch.float32)
         result["scores"] = torch.tensor(scores, dtype=torch.float32)
@@ -416,8 +457,9 @@ if __name__ == "__main__":
     
     model.to(device)
     
+    # Dino inference parameters
     BOX_THRESHOLD = 0.15
-    TEXT_THRESHOLD = 0.5 # 0.2 
+    TEXT_THRESHOLD = 0.5
     PROMPT = "articulated surgical instrument tip."
     #PROMPT = "surgical instrument."
     
