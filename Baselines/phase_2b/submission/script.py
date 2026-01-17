@@ -260,7 +260,7 @@ def post_process_tip_boxes(img: Image.Image, results):
             
         # new_box = density_box(img, box)
 
-        independent_indices = find_independent_boxes(boxes)
+        independent_indices = find_independent_boxes(boxes) # TODO 
         if independent_indices and scores[independent_indices[0]] != -np.inf:
             independent_box = boxes[independent_indices[0]].tolist()
             tip_boxes.append(independent_box)
@@ -280,8 +280,7 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
     test_images_names = []
     
     if test == True:    # test defined outside function 
-        pass
-        #test_images = list(np.random.permutation(test_images)) # TODO comment out for submission
+        test_images = list(np.random.permutation(test_images)) 
 
 
     for image_name in tqdm(test_images):
@@ -350,9 +349,9 @@ def run_inference(image_path, model, save_path, prompt, box_threshold, text_thre
                     if i == best_dino_idx:
                         draw.rectangle([xmin, ymin, xmax, ymax], outline="green", width=4)
                         score_text = f"DINO: {dino_scores_list[i]:.3f}"
-                    # else:
-                    #     draw.rectangle([xmin, ymin, xmax, ymax], outline="blue", width=2)
-                    #     score_text = f"{dino_scores_list[i]:.3f}" if i < len(dino_scores_list) else ""
+                    else:
+                        draw.rectangle([xmin, ymin, xmax, ymax], outline="blue", width=2)
+                        score_text = f"{dino_scores_list[i]:.3f}" if i < len(dino_scores_list) else ""
                     
                     # Draw score
                     text_pos = (xmin, max(0, ymin - 14))
