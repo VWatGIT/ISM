@@ -241,13 +241,56 @@ def score_boxes(img: Image.Image, boxes):
         score = -abs(box_area_value - optimal_area)
         return score
 
+    def normalize_scores(scores):
+        """Normalize scores to 0-1 range, where best score gets 1, worst gets 0"""
+        scores = np.array(scores)
+        
+        # Handle edge cases
+        if len(scores) == 0:
+            return scores
+        if len(scores) == 1:
+            return np.array([1.0])
+        
+        # Filter out -inf values for normalization
+        valid_mask = scores != -np.inf
+        if not np.any(valid_mask):
+            return scores  # all -inf, return as is
+        
+        valid_scores = scores[valid_mask]
+        min_score = np.min(valid_scores)
+        max_score = np.max(valid_scores)
+        
+        # If all valid scores are the same, assign 1 to all valid ones
+        if max_score == min_score:
+            normalized = np.where(valid_mask, 1.0, -np.inf)
+        else:
+            # Normalize valid scores to 0-1
+            normalized = np.where(
+                valid_mask,
+                (scores - min_score) / (max_score - min_score),
+                -np.inf
+            )
+        
+        return normalized
 
     relative_size_scores = np.array([relative_size_score(box, boxes) for box in boxes])
     edge_distance_scores = np.array([edge_distance_score(box, img) for box in boxes])
     aspect_scores = np.array([aspect_score(box) for box in boxes])
     size_scores = np.array([size_score(box, img) for box in boxes])
 
-    total_scores = 1*relative_size_scores + 1*edge_distance_scores + 1*aspect_scores + 1*size_scores
+    # Normalize each score component to 0-1 range
+    # Note: For aspect_scores, lower is better, so we invert after normalization
+    relative_size_scores_norm = normalize_scores(relative_size_scores)
+    edge_distance_scores_norm = normalize_scores(edge_distance_scores)
+    
+    # Invert aspect scores since lower absolute difference is better
+    aspect_scores_inverted = -aspect_scores  # Higher is better now
+    aspect_scores_norm = normalize_scores(aspect_scores_inverted)
+    
+    size_scores_norm = normalize_scores(size_scores)
+
+    # Combine normalized scores
+    total_scores = 0*relative_size_scores_norm + 4*edge_distance_scores_norm + 1*aspect_scores_norm + 2*size_scores_norm
 
     return total_scores
 
